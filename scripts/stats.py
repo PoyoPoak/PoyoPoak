@@ -69,7 +69,10 @@ def my_commits(repos, token):
         chunk = repos[start:start + 2]
         query = " ".join(
             'r%d:repository(owner:"%s",name:"%s"){refs(refPrefix:"refs/heads/",first:100){nodes{target{... on Commit'
-            '{history(author:{id:"%s"}){totalCount}}}}}}' % (i, repo["owner"]["login"], repo["name"], user_id)
+            '{history(author:{id:"%s"}%s){totalCount}}}}}}' % (
+                i, repo["owner"]["login"], repo["name"], user_id,
+                f',since:"{repo["since"]}",until:"{repo["until"]}"' if "since" in repo else "",
+            )
             for i, repo in enumerate(chunk)
         )
         data = api("https://api.github.com/graphql", token, {"query": "{%s}" % query}).get("data") or {}
@@ -160,16 +163,25 @@ def activity(token):
     since = (datetime.now(timezone.utc) - timedelta(days=ACTIVITY_DAYS)).strftime("%Y-%m-%dT00:00:00Z")
     rows = graphql(
         """{user(login:"%s"){contributionsCollection(from:"%s"){commitContributionsByRepository(maxRepositories:25){
-          repository{nameWithOwner isPrivate}
-          contributions(first:1,orderBy:{field:OCCURRED_AT,direction:DESC}){totalCount nodes{occurredAt}}}}}}"""
+          repository{name nameWithOwner isPrivate owner{login}}
+          contributions(first:1,orderBy:{field:OCCURRED_AT,direction:DESC}){nodes{occurredAt}}}}}}"""
         % (USER, since),
         token,
     )["contributionsCollection"]["commitContributionsByRepository"]
-    recent = [
-        (row["contributions"]["nodes"][0]["occurredAt"][:10], row["repository"]["nameWithOwner"], row["contributions"]["totalCount"])
+    candidates = [
+        {
+            **row["repository"],
+            "since": (day := row["contributions"]["nodes"][0]["occurredAt"]),
+            "until": (datetime.fromisoformat(day) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
         for row in rows
         if not row["repository"]["isPrivate"]  # private repository names are never published
         and row["contributions"]["nodes"] and row["repository"]["nameWithOwner"] != f"{USER}/{USER}"
+    ]
+    recent = [
+        (repo["since"][:10], repo["nameWithOwner"], commits)
+        for repo, commits in zip(candidates, my_commits(candidates, token))
+        if commits
     ]
     return sorted(recent, key=lambda item: (item[0], item[2]), reverse=True)[:ACTIVITY_ROWS]
 

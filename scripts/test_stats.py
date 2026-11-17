@@ -56,10 +56,36 @@ assert stats.stack.parse(SITE) == {
 }, stats.stack.parse(SITE)
 assert stats.stack.parse("<div>no skills section</div>") == {}
 
+# Recent contributions: counts actual commits on the latest day (not 90-day or rewritten contribution totals), with a leading +.
+orig_api = stats.api
+try:
+    def fake_api(url, token, body=None):
+        q = (body or {}).get("query", "")
+        if "commitContributionsByRepository" in q:
+            return {"data": {"user": {"contributionsCollection": {"commitContributionsByRepository": [
+                {"repository": {"name": "CameraOdometer", "nameWithOwner": "PoyoPoak/CameraOdometer", "isPrivate": False, "owner": {"login": "PoyoPoak"}},
+                 "contributions": {"totalCount": 113, "nodes": [{"occurredAt": "2026-11-16T08:00:00Z", "commitCount": 55}]}},
+                {"repository": {"name": "secret", "nameWithOwner": "PoyoPoak/secret", "isPrivate": True, "owner": {"login": "PoyoPoak"}},
+                 "contributions": {"totalCount": 99, "nodes": [{"occurredAt": "2026-11-16T08:00:00Z", "commitCount": 99}]}},
+                {"repository": {"name": "PoyoPoak", "nameWithOwner": "PoyoPoak/PoyoPoak", "isPrivate": False, "owner": {"login": "PoyoPoak"}},
+                 "contributions": {"totalCount": 17, "nodes": [{"occurredAt": "2026-11-16T08:00:00Z", "commitCount": 17}]}},
+            ]}}}}
+        if 'user(login:"PoyoPoak"){id}' in q:
+            return {"data": {"user": {"id": "U1"}}}
+        assert 'since:"2026-11-16T08:00:00Z",until:"2026-11-17T08:00:00Z"' in q, q
+        return {"data": {"r0": {"refs": {"nodes": [{"target": {"history": {"totalCount": 28}}}]}}}}
+
+    stats.api = fake_api
+    assert stats.activity("tok") == [("2026-11-16", "PoyoPoak/CameraOdometer", 28)]
+finally:
+    stats.api = orig_api
+
 # Dashboard: well-formed XML with data, and with nothing to show.
+rendered = stats.terminal.render({"Commits": 1234, "Pull requests": 56, "Contributions, past year": 7}, langs,
+                                 [("2026-01-02", "repo <&>", 12), ("2026-01-01", "other", 1)], stats.stack.SKILLS)
+assert "+12 " in rendered and "+1 " in rendered, rendered
 for svg in (
-    stats.terminal.render({"Commits": 1234, "Pull requests": 56, "Contributions, past year": 7}, langs,
-                          [("2026-01-02", "repo <&>", 12), ("2026-01-01", "other", 1)], stats.stack.SKILLS),
+    rendered,
     stats.terminal.render({"Commits": 1, "Pull requests": 2, "Contributions, past year": 3}, [], [], stats.stack.SKILLS),
 ):
     ET.fromstring(svg)
