@@ -9,7 +9,7 @@
 | Panel | Source |
 |---|---|
 | **stats** | GitHub API: all-time commits, pull requests, contributions in the past year, top languages |
-| **recent contributions** | GitHub API: public repositories with commits in the last 90 days, with commit counts |
+| **recent contributions** | GitHub API: repositories with my commits in the last 90 days, with the commit count on the latest day. Private ones (mine and those counted under `OWNERS`) read from branch history and show as `private` |
 | **stack** | Skills section of peterluey.com, read from `app/page.tsx` in `PoyoPoak/PersonalSite` |
 | **view counter** | komarev.com, live on every page view |
 
@@ -33,7 +33,7 @@ Set at the top of `scripts/stats.py`:
 - **Repositories:** my own, plus repositories of the organisations in `OWNERS` where I have at least `MIN_ORG_COMMITS` commits on some branch.
 - **Never counted:** repositories marked as templates on GitHub, and other people's organisations.
 - **Languages:** coursework repositories (`EXCLUDE_REPOS`) and generated languages (`EXCLUDE_LANGS`) are left out.
-- **Privacy:** only totals reach the image. Private repository names never appear; recent contributions lists public repositories only.
+- **Privacy:** only totals reach the image. Private repository names never appear; in recent contributions a private repository is labelled `private`.
 
 ## Token
 

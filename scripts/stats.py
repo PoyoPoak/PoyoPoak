@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import stack
 import terminal
@@ -26,6 +27,7 @@ EXCLUDE_REPOS = re.compile(r"^(osu-|chemeketa-|jos-labs)")  # coursework; skews 
 TOP_LANGS = 6
 ACTIVITY_ROWS = 4
 ACTIVITY_DAYS = 90  # how far back recent contributions look
+PACIFIC = ZoneInfo("America/Los_Angeles")  # the contribution calendar's day boundaries
 
 
 def api(url, token, body=None):
@@ -103,7 +105,7 @@ def fetch(token):
           contributionsCollection{contributionYears contributionCalendar{totalContributions}}
           repositories(first:100,isFork:false,ownerAffiliations:[OWNER,ORGANIZATION_MEMBER,COLLABORATOR]){
             totalCount
-            nodes{name isTemplate stargazerCount owner{login}
+            nodes{name isTemplate isPrivate pushedAt stargazerCount owner{login}
               languages(first:10,orderBy:{field:SIZE,direction:DESC}){edges{size node{name color}}}}}}}"""
         % USER,
         token,
@@ -125,7 +127,7 @@ def fetch(token):
     org = []
     for owner in sorted(OWNERS - {USER}):  # the user listing misses organisation repositories, so ask the organisation
         data = api("https://api.github.com/graphql", token, {"query": """{organization(login:"%s"){
-          repositories(first:100,isFork:false){nodes{name isTemplate stargazerCount owner{login}
+          repositories(first:100,isFork:false){nodes{name isTemplate isPrivate pushedAt stargazerCount owner{login}
             languages(first:10,orderBy:{field:SIZE,direction:DESC}){edges{size node{name color}}}}}}}""" % owner})
         org += ((data.get("data") or {}).get("organization") or {"repositories": {"nodes": []}})["repositories"]["nodes"]
     nodes += org
@@ -158,8 +160,43 @@ def aggregate_languages(repos):
     return [(name, 100 * size / total, colors[name]) for name, size in top]
 
 
-def activity(token):
-    """Recent commit contributions to public repositories: [(last day, "owner/repo", commits)], newest first."""
+def private_candidates(repos, since, token):
+    """Private repositories from repos with my commits since `since`, as my_commits input for the day of my newest one.
+
+    GitHub's contribution API hides private repositories even from their owner's token, so read branch history instead.
+    Each is labelled "private": private names are never published.
+    """
+    repos = [r for r in repos if r.get("isPrivate") and r.get("pushedAt", "") >= since]
+    if not repos:
+        return []
+    user_id = graphql('{user(login:"%s"){id}}' % USER, token)["id"]
+    out = []
+    for start in range(0, len(repos), 2):  # same chunking as my_commits, for the same time limit
+        chunk = repos[start:start + 2]
+        query = " ".join(
+            'r%d:repository(owner:"%s",name:"%s"){refs(refPrefix:"refs/heads/",first:100){nodes{target{... on Commit'
+            '{history(author:{id:"%s"},since:"%s",first:1){nodes{committedDate}}}}}}}' % (
+                i, repo["owner"]["login"], repo["name"], user_id, since)
+            for i, repo in enumerate(chunk)
+        )
+        data = api("https://api.github.com/graphql", token, {"query": "{%s}" % query}).get("data") or {}
+        for i, repo in enumerate(chunk):
+            branches = ((data.get(f"r{i}") or {}).get("refs") or {}).get("nodes") or []
+            dates = [n["committedDate"] for b in branches for n in (b.get("target") or {}).get("history", {}).get("nodes", [])]
+            if not dates:
+                continue
+            day = datetime.fromisoformat(max(dates)).astimezone(PACIFIC).replace(hour=0, minute=0, second=0, microsecond=0)
+            utc = lambda moment: moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            out.append({"owner": repo["owner"], "name": repo["name"], "nameWithOwner": "private",
+                        "since": utc(day), "until": utc(day + timedelta(days=1))})
+    return out
+
+
+def activity(token, repos=()):
+    """Recent commits: [(last day, "owner/repo" or "private", commits)], newest first.
+
+    Public repositories come from contributions; private ones in repos come from private_candidates.
+    """
     since = (datetime.now(timezone.utc) - timedelta(days=ACTIVITY_DAYS)).strftime("%Y-%m-%dT00:00:00Z")
     rows = graphql(
         """{user(login:"%s"){contributionsCollection(from:"%s"){commitContributionsByRepository(maxRepositories:25){
@@ -177,7 +214,7 @@ def activity(token):
         for row in rows
         if not row["repository"]["isPrivate"]  # private repository names are never published
         and row["contributions"]["nodes"] and row["repository"]["nameWithOwner"] != f"{USER}/{USER}"
-    ]
+    ] + private_candidates(repos, since, token)
     recent = [
         (repo["since"][:10], repo["nameWithOwner"], commits)
         for repo, commits in zip(candidates, my_commits(candidates, token))
@@ -189,7 +226,7 @@ def activity(token):
 def main():
     token = os.environ["GH_TOKEN"]
     numbers, repos = fetch(token)
-    recent = [(day, name.split("/")[1], commits) for day, name, commits in activity(token)]
+    recent = [(day, name.split("/")[-1], commits) for day, name, commits in activity(token, repos)]
     svg = terminal.render(numbers, aggregate_languages(repos), recent, stack.sync())
     (ROOT / "assets" / "dashboard.svg").write_text(svg)
     print(numbers)

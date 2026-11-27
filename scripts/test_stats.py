@@ -1,5 +1,6 @@
 """Run: python3 scripts/test_stats.py"""
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
 
 import stats
 
@@ -72,11 +73,30 @@ try:
             ]}}}}
         if 'user(login:"PoyoPoak"){id}' in q:
             return {"data": {"user": {"id": "U1"}}}
-        assert 'since:"2026-11-16T08:00:00Z",until:"2026-11-17T08:00:00Z"' in q, q
-        return {"data": {"r0": {"refs": {"nodes": [{"target": {"history": {"totalCount": 28}}}]}}}}
+        if "first:1){nodes{committedDate}}" in q:  # newest commit of mine per branch of a private repository
+            assert 'name:"hidden"' in q and 'name:"stale"' not in q, q
+            return {"data": {"r0": {"refs": {"nodes": [
+                {"target": {"history": {"nodes": [{"committedDate": "2026-11-21T03:00:00Z"}]}}},  # 11-20 Pacific, newest
+                {"target": {"history": {"nodes": [{"committedDate": "2026-11-19T20:00:00Z"}]}}},
+                {"target": {"history": {"nodes": []}}},
+            ]}}}}
+        assert 'name:"CameraOdometer"' in q and 'since:"2026-11-16T08:00:00Z",until:"2026-11-17T08:00:00Z"' in q, q
+        counts = [28]
+        if 'name:"hidden"' in q:
+            assert 'since:"2026-11-20T08:00:00Z",until:"2026-11-21T08:00:00Z"' in q, q
+            counts.append(4)
+        return {"data": {f"r{i}": {"refs": {"nodes": [{"target": {"history": {"totalCount": n}}}]}} for i, n in enumerate(counts)}}
 
     stats.api = fake_api
     assert stats.activity("tok") == [("2026-11-16", "PoyoPoak/CameraOdometer", 28)]
+    # Private repositories show as "private" with my commits on the Pacific day of my newest commit on any branch.
+    pushed = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    owned = [
+        node("Ka-Technology", "hidden", isPrivate=True, pushedAt=pushed),
+        node("PoyoPoak", "stale", isPrivate=True, pushedAt="2020-01-01T00:00:00Z"),  # outside the window, never queried
+        node("PoyoPoak", "CameraOdometer", isPrivate=False, pushedAt=pushed),  # public: comes from contributions
+    ]
+    assert stats.activity("tok", owned) == [("2026-11-20", "private", 4), ("2026-11-16", "PoyoPoak/CameraOdometer", 28)]
 finally:
     stats.api = orig_api
 

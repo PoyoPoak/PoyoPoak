@@ -136,12 +136,12 @@ def now_panel():
 
 
 def contributions_panel(recent, w, rows=4):
-    """Recent public contributions: last day, repository, commit count."""
+    """Recent contributions: last day, repository (or "private"), commit count."""
     out = "".join(
         text(20, 32 + LINE * i, [(day[5:] + "  ", DIM), (repo[:18], FG)])
         + text(w - 20, 32 + LINE * i, [(f"+{commits:,} ", FG), ("commits" if commits != 1 else "commit ", DIM)], anchor="end")
         for i, (day, repo, commits) in enumerate(recent[:rows])
-    ) or text(20, 32, [("no recent public commits", DIM)])
+    ) or text(20, 32, [("no recent commits", DIM)])
     return out, 126
 
 
